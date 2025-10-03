@@ -168,20 +168,27 @@ function Set-MailboxPermissions {
                 Write-Host "Trustee changed to: $Trustee"
                 Write-Log "Changed default trustee to [$Trustee]"
             }
-            "17" {
-                $NewTenant = Read-Host "Enter NEW Tenant Name (e.g. dekalbhousing.org)"
-                Write-Host "Disconnecting from current tenant..."
-                Disconnect-ExchangeOnline -Confirm:$false
-                try {
-                    Connect-ExchangeOnline -Organization $NewTenant -ErrorAction Stop
-                    $Tenant = $NewTenant
-                    Write-Host "Reconnected to tenant: $Tenant"
-                    Write-Log "Changed and reconnected to tenant [$Tenant]"
-                } catch {
-                    Write-Host "Failed to connect to tenant $NewTenant. Staying connected to $Tenant."
-                    Write-Log "Failed to connect to new tenant [$NewTenant]"
-                }
-            }
+"17" {
+    $NewTenant = Read-Host "Enter NEW Tenant Name (e.g. dekalbhousing.org)"
+    Write-Host "Disconnecting from current tenant..."
+    Disconnect-ExchangeOnline -Confirm:$false
+
+    try {
+        Connect-ExchangeOnline -Organization $NewTenant -ErrorAction Stop
+        $Tenant = $NewTenant
+        Write-Host "✅ Reconnected to tenant: $Tenant"
+        Write-Log "Changed and reconnected to tenant [$Tenant]"
+
+        # Prompt for updated identity and trustee
+        $Identity = Read-Host "Enter NEW mailbox Identity for tenant [$Tenant]"
+        $Trustee = Read-Host "Enter NEW default Trustee for tenant [$Tenant]"
+        Write-Log "Updated Identity to [$Identity] and Trustee to [$Trustee] for tenant [$Tenant]"
+
+    } catch {
+        Write-Host "❌ Failed to connect to tenant $NewTenant. Staying connected to previous tenant: $Tenant."
+        Write-Log "Failed to connect to new tenant [$NewTenant]"
+    }
+}
             default {
                 Write-Host "Invalid option. Try again."
             }
@@ -196,3 +203,4 @@ function Set-MailboxPermissions {
 
 # Run the function
 Set-MailboxPermissions
+
