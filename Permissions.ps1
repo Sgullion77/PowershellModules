@@ -2,7 +2,7 @@ function Set-MailboxPermissions {
     # Prompt for tenant first
     $Tenant = Read-Host "Enter the Tenant Name (e.g. flextg.com, dekalbhousing.org)"
 
-    # Initial connection
+    # Initial connection to Exchange Online
     try {
         Connect-ExchangeOnline -Organization $Tenant -ErrorAction Stop
     } catch {
@@ -16,6 +16,7 @@ function Set-MailboxPermissions {
     if (!(Test-Path $LogPath)) { New-Item -ItemType Directory -Path $LogPath -Force | Out-Null }
 
     $CurrentUser = "$env:USERDOMAIN\$env:USERNAME"
+    $GraphConnected = $false   # Track Graph connection state
 
     function Write-Log {
         param([string]$Message)
@@ -49,9 +50,11 @@ function Set-MailboxPermissions {
         Write-Host "15. Change Mailbox Identity (currently: $Identity)"
         Write-Host "16. Change Default Trustee (currently: $Trustee)"
         Write-Host "17. Change Tenant Name (and reconnect)"
+        Write-Host "18. Change Primary UPN and Add Aliases (Graph API)"
+        Write-Host "19. List Current UPN and Aliases (Graph API)"
         Write-Host "======================================================================"
 
-        $choice = Read-Host "Select an option (1-17)"
+        $choice = Read-Host "Select an option (1-19)"
 
         switch ($choice) {
             "1" {
@@ -168,27 +171,110 @@ function Set-MailboxPermissions {
                 Write-Host "Trustee changed to: $Trustee"
                 Write-Log "Changed default trustee to [$Trustee]"
             }
-"17" {
-    $NewTenant = Read-Host "Enter NEW Tenant Name (e.g. dekalbhousing.org)"
-    Write-Host "Disconnecting from current tenant..."
-    Disconnect-ExchangeOnline -Confirm:$false
+            "17" {
+                $NewTenant = Read-Host "Enter NEW Tenant Name (e.g. dekalbhousing.org)"
+                Write-Host "Disconnecting from current tenant..."
+                Disconnect-ExchangeOnline -Confirm:$false
+                try {
+                    Connect-ExchangeOnline -Organization $NewTenant -ErrorAction Stop
+                    $Tenant = $NewTenant
+                    Write-Host "Reconnected to tenant: $Tenant"
+                    Write-Log "Changed and reconnected to tenant [$Tenant]"
 
-    try {
-        Connect-ExchangeOnline -Organization $NewTenant -ErrorAction Stop
-        $Tenant = $NewTenant
-        Write-Host "Reconnected to tenant: $Tenant"
-        Write-Log "Changed and reconnected to tenant [$Tenant]"
+                    $Identity = Read-Host "Enter NEW mailbox Identity for tenant [$Tenant]"
+                    $Trustee = Read-Host "Enter NEW default Trustee for tenant [$Tenant]"
+                    Write-Log "Updated Identity to [$Identity] and Trustee to [$Trustee] for tenant [$Tenant]"
 
-        # Prompt for updated identity and trustee
-        $Identity = Read-Host "Enter NEW mailbox Identity for tenant [$Tenant]"
-        $Trustee = Read-Host "Enter NEW default Trustee for tenant [$Tenant]"
-        Write-Log "Updated Identity to [$Identity] and Trustee to [$Trustee] for tenant [$Tenant]"
+                } catch {
+                    Write-Host "Failed to connect to tenant $NewTenant. Staying connected to previous tenant: $Tenant."
+                    Write-Log "Failed to connect to new tenant [$NewTenant]"
+                }
+            }
+            "18" {
+                if (-not $GraphConnected) {
+                    try {
+                        Connect-MgGraph -Scopes "User.ReadWrite.All" -ErrorAction Stop
+                        $GraphConnected = $true
+                        Write-Host "Connected to Microsoft Graph."
+                        Write-Log "Connected to Microsoft Graph for tenant [$Tenant]"
+                    } catch {
+                        Write-Host "Failed to connect to Graph API."
+                        break
+                    }
+                }
 
-    } catch {
-        Write-Host "Failed to connect to tenant $NewTenant. Staying connected to previous tenant: $Tenant."
-        Write-Log "Failed to connect to new tenant [$NewTenant]"
-    }
-}
+                $NewPrimary = Read-Host "Enter NEW primary UPN for user [$Identity] (press Enter to skip)"
+                $NewAliasesInput = Read-Host "Enter one or more NEW secondary aliases (comma-separated, press Enter to skip)"
+                $AliasList = $NewAliasesInput -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+
+                try {
+                    $User = Get-MgUser -UserId $Identity -Property OtherMails,UserPrincipalName
+                    $CurrentAliases = $User.OtherMails
+
+                    if ($AliasList.Count -gt 0) {
+                        $UpdatedAliases = ($CurrentAliases + $AliasList) | Sort-Object -Unique
+                    } else {
+                        $UpdatedAliases = $CurrentAliases
+                    }
+
+                    $UpdateParams = @{}
+                    if ($NewPrimary -and $NewPrimary -ne $User.UserPrincipalName) {
+                        $UpdateParams["UserPrincipalName"] = $NewPrimary
+                    }
+                    if ($UpdatedAliases) {
+                        $UpdateParams["OtherMails"] = $UpdatedAliases
+                    }
+
+                    if ($UpdateParams.Count -gt 0) {
+                        Update-MgUser -UserId $Identity @UpdateParams
+
+                        if ($UpdateParams.ContainsKey("UserPrincipalName")) {
+                            Write-Host "Primary UPN changed from [$($User.UserPrincipalName)] to [$NewPrimary]"
+                            Write-Log "Primary UPN changed from [$($User.UserPrincipalName)] to [$NewPrimary]"
+                            $Identity = $NewPrimary
+                        }
+                        if ($UpdateParams.ContainsKey("OtherMails")) {
+                            Write-Host "Aliases updated for [$Identity]: $($UpdatedAliases -join ', ')"
+                            Write-Log "Updated aliases for [$Identity]: $($UpdatedAliases -join ', ')"
+                        }
+                    } else {
+                        Write-Host "No changes made for [$Identity]."
+                    }
+                } catch {
+                    Write-Host "Failed to update UPN/Aliases for [$Identity]"
+                    Write-Log "FAILED updating UPN/Aliases for [$Identity]"
+                }
+            }
+            "19" {
+                if (-not $GraphConnected) {
+                    try {
+                        Connect-MgGraph -Scopes "User.Read.All" -ErrorAction Stop
+                        $GraphConnected = $true
+                        Write-Host "Connected to Microsoft Graph."
+                        Write-Log "Connected to Microsoft Graph for tenant [$Tenant]"
+                    } catch {
+                        Write-Host "Failed to connect to Graph API."
+                        break
+                    }
+                }
+
+                try {
+                    $User = Get-MgUser -UserId $Identity -Property OtherMails,UserPrincipalName
+                    $PrimaryUPN = $User.UserPrincipalName
+                    $SecondaryAliases = $User.OtherMails
+
+                    $AliasTable = @()
+                    $AliasTable += [PSCustomObject]@{Type="Primary"; Alias=$PrimaryUPN}
+                    foreach ($a in $SecondaryAliases) {
+                        $AliasTable += [PSCustomObject]@{Type="Secondary"; Alias=$a}
+                    }
+                    $AliasTable | Format-Table -AutoSize
+                    Write-Log "Listed UPN/Aliases for [$Identity]"
+                } catch {
+                    Write-Host "Failed to retrieve UPN/Aliases for [$Identity]"
+                    Write-Log "FAILED retrieving UPN/Aliases for [$Identity]"
+                }
+            }
             default {
                 Write-Host "Invalid option. Try again."
             }
@@ -203,5 +289,3 @@ function Set-MailboxPermissions {
 
 # Run the function
 Set-MailboxPermissions
-
-
