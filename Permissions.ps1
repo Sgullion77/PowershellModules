@@ -1,3 +1,4 @@
+
 function Set-MailboxPermissions {
     # Connect to Exchange Online
     Connect-ExchangeOnline
@@ -15,8 +16,9 @@ function Set-MailboxPermissions {
         Add-Content -Path $LogFile -Value "$TimeStamp - $CurrentUser - $Message"
     }
 
-    # Prompt for mailbox
-    $Identity = Read-Host "Enter the mailbox Identity (dispatch@soscanhelp.com, supplies@soscanhelp.com)"
+    # Prompt for initial mailbox + trustee
+    $Identity = Read-Host "Enter the initial mailbox Identity (dispatch@soscanhelp.com, supplies@soscanhelp.com)"
+    $Trustee = Read-Host "Enter the initial default Trustee (can be changed later)"
 
     do {
         Clear-Host
@@ -35,43 +37,39 @@ function Set-MailboxPermissions {
         Write-Host "12. Bulk Add Calendar Permissions (comma-separated trustees)"
         Write-Host "13. Bulk Add Calendar Permissions from CSV"
         Write-Host "14. Bulk Remove Calendar Permissions from CSV"
+        Write-Host "15. Change Mailbox Identity (currently: $Identity)"
+        Write-Host "16. Change Default Trustee (currently: $Trustee)"
         Write-Host "============================================================"
         
-        $choice = Read-Host "Select an option (1-14)"
+        $choice = Read-Host "Select an option (1-16)"
 
         switch ($choice) {
             "1" {
-                $Trustee = Read-Host "Enter the Trustee"
                 Add-RecipientPermission -Identity $Identity -Trustee $Trustee -AccessRights SendAs -Confirm:$false
                 Write-Host "SendAs permission added."
                 Write-Log "Added SendAs permission for Trustee [$Trustee] on [$Identity]"
             }
             "2" {
-                $Trustee = Read-Host "Enter the Trustee"
                 Add-MailboxPermission -Identity $Identity -User $Trustee -AccessRights FullAccess -AutoMapping:$false -Confirm:$false
                 Write-Host "FullAccess permission added."
                 Write-Log "Added FullAccess permission for Trustee [$Trustee] on [$Identity]"
             }
             "3" {
-                $Trustee = Read-Host "Enter the Trustee"
                 Set-Mailbox -Identity $Identity -GrantSendOnBehalfTo @{Add=$Trustee}
                 Write-Host "SendOnBehalf permission added."
                 Write-Log "Added SendOnBehalf permission for Trustee [$Trustee] on [$Identity]"
             }
             "4" {
-                $Trustee = Read-Host "Enter the Trustee"
                 Remove-RecipientPermission -Identity $Identity -Trustee $Trustee -AccessRights SendAs -Confirm:$false
                 Write-Host "SendAs permission removed."
                 Write-Log "Removed SendAs permission for Trustee [$Trustee] on [$Identity]"
             }
             "5" {
-                $Trustee = Read-Host "Enter the Trustee"
                 Remove-MailboxPermission -Identity $Identity -User $Trustee -AccessRights FullAccess -Confirm:$false
                 Write-Host "FullAccess permission removed."
                 Write-Log "Removed FullAccess permission for Trustee [$Trustee] on [$Identity]"
             }
             "6" {
-                $Trustee = Read-Host "Enter the Trustee"
                 Set-Mailbox -Identity $Identity -GrantSendOnBehalfTo @{Remove=$Trustee}
                 Write-Host "SendOnBehalf permission removed."
                 Write-Log "Removed SendOnBehalf permission for Trustee [$Trustee] on [$Identity]"
@@ -92,14 +90,12 @@ function Set-MailboxPermissions {
                 (Get-Mailbox -Identity $Identity).GrantSendOnBehalfTo | Format-Table -AutoSize
             }
             "9" {
-                $Trustee = Read-Host "Enter the Trustee"
                 $AccessRight = Read-Host "Enter Calendar Permission Role (e.g. Reviewer, Editor, Owner)"
                 Add-MailboxFolderPermission -Identity "$Identity`:Calendar" -User $Trustee -AccessRights $AccessRight -Confirm:$false
                 Write-Host "Calendar permission ($AccessRight) added for $Trustee."
                 Write-Log "Added Calendar permission [$AccessRight] for Trustee [$Trustee] on [$Identity]"
             }
             "10" {
-                $Trustee = Read-Host "Enter the Trustee"
                 Remove-MailboxFolderPermission -Identity "$Identity`:Calendar" -User $Trustee -Confirm:$false
                 Write-Host "Calendar permission removed for $Trustee."
                 Write-Log "Removed Calendar permission for Trustee [$Trustee] on [$Identity]"
@@ -153,6 +149,16 @@ function Set-MailboxPermissions {
                     Write-Host "CSV file not found at $CSVPath"
                 }
             }
+            "15" {
+                $Identity = Read-Host "Enter NEW mailbox Identity"
+                Write-Host "Mailbox identity changed to: $Identity"
+                Write-Log "Changed mailbox identity to [$Identity]"
+            }
+            "16" {
+                $Trustee = Read-Host "Enter NEW default Trustee"
+                Write-Host "Default Trustee changed to: $Trustee"
+                Write-Log "Changed default Trustee to [$Trustee]"
+            }
             default {
                 Write-Host "Invalid option. Please try again."
             }
@@ -167,4 +173,3 @@ function Set-MailboxPermissions {
 
 #Call the function:
 Set-MailboxPermissions
-
