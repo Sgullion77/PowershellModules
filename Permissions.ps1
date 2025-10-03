@@ -102,22 +102,22 @@ function Set-MailboxPermissions {
                 (Get-Mailbox -Identity $Identity).GrantSendOnBehalfTo | Format-Table -AutoSize
 
                 Write-Host "`n--- Calendar Permissions ---"
-                Get-MailboxFolderPermission -Identity "$Identity:\Calendar" | Format-Table User, AccessRights -AutoSize
+                Get-MailboxFolderPermission -Identity "${Identity}:\Calendar" | Format-Table User, AccessRights -AutoSize
             }
             "9" {
                 $AccessRight = Read-Host "Enter Calendar Permission Role (e.g. Reviewer, Editor, Owner)"
-                Add-MailboxFolderPermission -Identity "$Identity:\Calendar" -User $Trustee -AccessRights $AccessRight -Confirm:$false
+                Add-MailboxFolderPermission -Identity "${Identity}:\Calendar" -User $Trustee -AccessRights $AccessRight -Confirm:$false
                 Write-Host "Calendar permission ($AccessRight) added for $Trustee."
                 Write-Log "Added Calendar permission [$AccessRight] for Trustee [$Trustee] on [$Identity]"
             }
             "10" {
-                Remove-MailboxFolderPermission -Identity "$Identity:\Calendar" -User $Trustee -Confirm:$false
+                Remove-MailboxFolderPermission -Identity "${Identity}:\Calendar" -User $Trustee -Confirm:$false
                 Write-Host "Calendar permission removed for $Trustee."
                 Write-Log "Removed Calendar permission for Trustee [$Trustee] on [$Identity]"
             }
             "11" {
                 Write-Host "Listing Calendar permissions for mailbox: $Identity"
-                Get-MailboxFolderPermission -Identity "$Identity:\Calendar" | Format-Table User, AccessRights -AutoSize
+                Get-MailboxFolderPermission -Identity "${Identity}:\Calendar" | Format-Table User, AccessRights -AutoSize
             }
             "12" {
                 $Trustees = Read-Host "Enter multiple trustees (comma-separated emails)"
@@ -125,7 +125,7 @@ function Set-MailboxPermissions {
                 $AccessRight = Read-Host "Enter Calendar Permission Role"
                 foreach ($user in $TrusteeList) {
                     $trimmedUser = $user.Trim()
-                    Add-MailboxFolderPermission -Identity "$Identity:\Calendar" -User $trimmedUser -AccessRights $AccessRight -Confirm:$false
+                    Add-MailboxFolderPermission -Identity "${Identity}:\Calendar" -User $trimmedUser -AccessRights $AccessRight -Confirm:$false
                     Write-Host "Calendar permission ($AccessRight) added for $trimmedUser."
                     Write-Log "Added Calendar permission [$AccessRight] for Trustee [$trimmedUser] on [$Identity]"
                 }
@@ -137,7 +137,7 @@ function Set-MailboxPermissions {
                     $AccessRight = Read-Host "Enter Calendar Permission Role"
                     foreach ($u in $Users) {
                         $UserEmail = $u.User.Trim()
-                        Add-MailboxFolderPermission -Identity "$Identity:\Calendar" -User $UserEmail -AccessRights $AccessRight -Confirm:$false
+                        Add-MailboxFolderPermission -Identity "${Identity}:\Calendar" -User $UserEmail -AccessRights $AccessRight -Confirm:$false
                         Write-Host "Calendar permission ($AccessRight) added for $UserEmail."
                         Write-Log "Added Calendar permission [$AccessRight] for Trustee [$UserEmail] on [$Identity]"
                     }
@@ -152,7 +152,7 @@ function Set-MailboxPermissions {
                     foreach ($u in $Users) {
                         $UserEmail = $u.User.Trim()
                         try {
-                            Remove-MailboxFolderPermission -Identity "$Identity:\Calendar" -User $UserEmail -Confirm:$false -ErrorAction Stop
+                            Remove-MailboxFolderPermission -Identity "${Identity}:\Calendar" -User $UserEmail -Confirm:$false -ErrorAction Stop
                             Write-Host "Calendar permission removed for $UserEmail."
                             Write-Log "Removed Calendar permission for Trustee [$UserEmail] on [$Identity]"
                         } catch {
