@@ -176,7 +176,7 @@ function Set-MailboxPermissions {
     try {
         Connect-ExchangeOnline -Organization $NewTenant -ErrorAction Stop
         $Tenant = $NewTenant
-        Write-Host "✅ Reconnected to tenant: $Tenant"
+        Write-Host "Reconnected to tenant: $Tenant"
         Write-Log "Changed and reconnected to tenant [$Tenant]"
 
         # Prompt for updated identity and trustee
@@ -185,7 +185,7 @@ function Set-MailboxPermissions {
         Write-Log "Updated Identity to [$Identity] and Trustee to [$Trustee] for tenant [$Tenant]"
 
     } catch {
-        Write-Host "❌ Failed to connect to tenant $NewTenant. Staying connected to previous tenant: $Tenant."
+        Write-Host "Failed to connect to tenant $NewTenant. Staying connected to previous tenant: $Tenant."
         Write-Log "Failed to connect to new tenant [$NewTenant]"
     }
 }
@@ -203,4 +203,5 @@ function Set-MailboxPermissions {
 
 # Run the function
 Set-MailboxPermissions
+
 
