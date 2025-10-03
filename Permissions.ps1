@@ -1,9 +1,16 @@
-
 function Set-MailboxPermissions {
-    # Connect to Exchange Online
-    Connect-ExchangeOnline
+    # Prompt for tenant first
+    $Tenant = Read-Host "Enter the Tenant Name (e.g. flextg.com, dekalbhousing.org)"
 
-    # Setup logging to C:\Temp\Powershell-logging
+    # Initial connection
+    try {
+        Connect-ExchangeOnline -Organization $Tenant -ErrorAction Stop
+    } catch {
+        Write-Host "Failed to connect to tenant $Tenant. Exiting..."
+        return
+    }
+
+    # Setup logging
     $LogPath = "C:\Temp\Powershell-Logging"
     $LogFile = "$LogPath\MailboxPermissionLog.txt"
     if (!(Test-Path $LogPath)) { New-Item -ItemType Directory -Path $LogPath -Force | Out-Null }
@@ -17,12 +24,14 @@ function Set-MailboxPermissions {
     }
 
     # Prompt for initial mailbox + trustee
-    $Identity = Read-Host "Enter the initial mailbox Identity (dispatch@soscanhelp.com, supplies@soscanhelp.com)"
-    $Trustee = Read-Host "Enter the initial default Trustee (can be changed later)"
+    $Identity = Read-Host "Enter the initial mailbox Identity (e.g. dispatch@dekalbhousing.org)"
+    $Trustee = Read-Host "Enter the initial default Trustee (e.g. user@dekalbhousing.org)"
 
     do {
         Clear-Host
-        Write-Host "================= Mailbox Permission Menu ================="
+        Write-Host "================= Mailbox Permission Menu ============================        Tenant: $Tenant"
+        Write-Host "Mailbox: $Identity        Trustee: $Trustee"
+        Write-Host "======================================================================"
         Write-Host " 1.  Add SendAs Permission"
         Write-Host " 2.  Add FullAccess Permission"
         Write-Host " 3.  Add SendOnBehalf Permission"
@@ -39,9 +48,10 @@ function Set-MailboxPermissions {
         Write-Host "14. Bulk Remove Calendar Permissions from CSV"
         Write-Host "15. Change Mailbox Identity (currently: $Identity)"
         Write-Host "16. Change Default Trustee (currently: $Trustee)"
-        Write-Host "============================================================"
-        
-        $choice = Read-Host "Select an option (1-16)"
+        Write-Host "17. Change Tenant Name (and reconnect)"
+        Write-Host "======================================================================"
+
+        $choice = Read-Host "Select an option (1-17)"
 
         switch ($choice) {
             "1" {
@@ -75,11 +85,10 @@ function Set-MailboxPermissions {
                 Write-Log "Removed SendOnBehalf permission for Trustee [$Trustee] on [$Identity]"
             }
             "7" {
-                Write-Host "Exiting menu..."
+                Write-Host "Exiting..."
                 break
             }
             "8" {
-                Write-Host "Listing current permissions for mailbox: $Identity"
                 Write-Host "`n--- SendAs Permissions ---"
                 Get-RecipientPermission -Identity $Identity | Format-Table Trustee, AccessRights -AutoSize
 
@@ -105,9 +114,9 @@ function Set-MailboxPermissions {
                 Get-MailboxFolderPermission -Identity "$Identity`:Calendar" | Format-Table User, AccessRights -AutoSize
             }
             "12" {
-                $Trustees = Read-Host "Enter multiple trustees (comma-separated user emails)"
+                $Trustees = Read-Host "Enter multiple trustees (comma-separated emails)"
                 $TrusteeList = $Trustees -split ","
-                $AccessRight = Read-Host "Enter Calendar Permission Role (e.g. Reviewer, Editor, Owner)"
+                $AccessRight = Read-Host "Enter Calendar Permission Role"
                 foreach ($user in $TrusteeList) {
                     $trimmedUser = $user.Trim()
                     Add-MailboxFolderPermission -Identity "$Identity`:Calendar" -User $trimmedUser -AccessRights $AccessRight -Confirm:$false
@@ -116,10 +125,10 @@ function Set-MailboxPermissions {
                 }
             }
             "13" {
-                $CSVPath = Read-Host "Enter full path to CSV file (e.g. C:\Users\YourName\trustees.csv)"
+                $CSVPath = Read-Host "Enter path to CSV (must have a 'User' column)"
                 if (Test-Path $CSVPath) {
                     $Users = Import-Csv $CSVPath
-                    $AccessRight = Read-Host "Enter Calendar Permission Role (e.g. Reviewer, Editor, Owner)"
+                    $AccessRight = Read-Host "Enter Calendar Permission Role"
                     foreach ($u in $Users) {
                         $UserEmail = $u.User.Trim()
                         Add-MailboxFolderPermission -Identity "$Identity`:Calendar" -User $UserEmail -AccessRights $AccessRight -Confirm:$false
@@ -131,7 +140,7 @@ function Set-MailboxPermissions {
                 }
             }
             "14" {
-                $CSVPath = Read-Host "Enter full path to CSV file (e.g. C:\Users\YourName\trustees.csv)"
+                $CSVPath = Read-Host "Enter path to CSV (must have a 'User' column)"
                 if (Test-Path $CSVPath) {
                     $Users = Import-Csv $CSVPath
                     foreach ($u in $Users) {
@@ -141,8 +150,8 @@ function Set-MailboxPermissions {
                             Write-Host "Calendar permission removed for $UserEmail."
                             Write-Log "Removed Calendar permission for Trustee [$UserEmail] on [$Identity]"
                         } catch {
-                            Write-Host "Failed to remove permission for $UserEmail (may not exist)."
-                            Write-Log "FAILED removing Calendar permission for Trustee [$UserEmail] on [$Identity]"
+                            Write-Host "Failed to remove permission for $UserEmail"
+                            Write-Log "FAILED removing Calendar permission for [$UserEmail] on [$Identity]"
                         }
                     }
                 } else {
@@ -156,11 +165,25 @@ function Set-MailboxPermissions {
             }
             "16" {
                 $Trustee = Read-Host "Enter NEW default Trustee"
-                Write-Host "Default Trustee changed to: $Trustee"
-                Write-Log "Changed default Trustee to [$Trustee]"
+                Write-Host "Trustee changed to: $Trustee"
+                Write-Log "Changed default trustee to [$Trustee]"
+            }
+            "17" {
+                $NewTenant = Read-Host "Enter NEW Tenant Name (e.g. dekalbhousing.org)"
+                Write-Host "Disconnecting from current tenant..."
+                Disconnect-ExchangeOnline -Confirm:$false
+                try {
+                    Connect-ExchangeOnline -Organization $NewTenant -ErrorAction Stop
+                    $Tenant = $NewTenant
+                    Write-Host "Reconnected to tenant: $Tenant"
+                    Write-Log "Changed and reconnected to tenant [$Tenant]"
+                } catch {
+                    Write-Host "Failed to connect to tenant $NewTenant. Staying connected to $Tenant."
+                    Write-Log "Failed to connect to new tenant [$NewTenant]"
+                }
             }
             default {
-                Write-Host "Invalid option. Please try again."
+                Write-Host "Invalid option. Try again."
             }
         }
 
@@ -171,5 +194,5 @@ function Set-MailboxPermissions {
     } while ($choice -ne "7")
 }
 
-#Call the function:
+# Run the function
 Set-MailboxPermissions
