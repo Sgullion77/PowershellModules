@@ -2,7 +2,7 @@ function Set-MailboxPermissions {
     # Connect to Exchange Online
     Connect-ExchangeOnline
 
-    # Setup logging
+    # Setup logging to C:\Temp\Powershell-logging
     $LogPath = "C:\Temp\Powershell-Logging"
     $LogFile = "$LogPath\MailboxPermissionLog.txt"
     if (!(Test-Path $LogPath)) { New-Item -ItemType Directory -Path $LogPath -Force | Out-Null }
@@ -167,3 +167,4 @@ function Set-MailboxPermissions {
 
 #Call the function:
 Set-MailboxPermissions
+
