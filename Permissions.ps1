@@ -109,7 +109,7 @@ function Set-MailboxPermissions {
                 Get-MailboxFolderPermission -Identity "$Identity`:Calendar" | Format-Table User, AccessRights -AutoSize
             }
             "12" {
-                $Trustees = Read-Host "Enter multiple trustees (comma-separated user emails, example; Seth.Gullion@flextg.com, LA@soscanhelp.com)"
+                $Trustees = Read-Host "Enter multiple trustees (comma-separated user emails)"
                 $TrusteeList = $Trustees -split ","
                 $AccessRight = Read-Host "Enter Calendar Permission Role (e.g. Reviewer, Editor, Owner)"
                 foreach ($user in $TrusteeList) {
@@ -120,7 +120,7 @@ function Set-MailboxPermissions {
                 }
             }
             "13" {
-                $CSVPath = Read-Host "Enter full path to CSV file (e.g. C:\Users\Seth.Gullion\trustees.csv)"
+                $CSVPath = Read-Host "Enter full path to CSV file (e.g. C:\Users\YourName\trustees.csv)"
                 if (Test-Path $CSVPath) {
                     $Users = Import-Csv $CSVPath
                     $AccessRight = Read-Host "Enter Calendar Permission Role (e.g. Reviewer, Editor, Owner)"
@@ -135,7 +135,7 @@ function Set-MailboxPermissions {
                 }
             }
             "14" {
-                $CSVPath = Read-Host "Enter full path to CSV file (e.g. C:\Users\Seth.Gullion\trustees.csv)"
+                $CSVPath = Read-Host "Enter full path to CSV file (e.g. C:\Users\YourName\trustees.csv)"
                 if (Test-Path $CSVPath) {
                     $Users = Import-Csv $CSVPath
                     foreach ($u in $Users) {
@@ -164,3 +164,6 @@ function Set-MailboxPermissions {
 
     } while ($choice -ne "7")
 }
+
+#Call the function:
+Set-MailboxPermissions
