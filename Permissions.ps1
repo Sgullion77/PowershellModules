@@ -18,10 +18,40 @@ function Set-MailboxPermissions {
     $CurrentUser = "$env:USERDOMAIN\$env:USERNAME"
     $GraphConnected = $false   # Track Graph connection state
 
+    # Logging function
     function Write-Log {
         param([string]$Message)
         $TimeStamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
         Add-Content -Path $LogFile -Value "$TimeStamp - $CurrentUser - $Message"
+    }
+
+    # Validate mailbox exists
+    function Validate-Mailbox {
+        param($Mailbox)
+        try {
+            Get-Mailbox -Identity $Mailbox -ErrorAction Stop | Out-Null
+            return $true
+        } catch {
+            Write-Host "Mailbox [$Mailbox] does not exist or cannot be found."
+            Write-Log "FAILED: Mailbox [$Mailbox] does not exist."
+            return $false
+        }
+    }
+
+    # Calendar roles allowed
+    $ValidCalendarRoles = @("Owner","PublishingEditor","Editor","PublishingAuthor","Author","NonEditingAuthor","Reviewer","Contributor","None")
+
+    # Validate calendar role input
+    function Get-ValidCalendarRole {
+        param($PromptMessage)
+        do {
+            $RoleInput = Read-Host $PromptMessage
+            if ($ValidCalendarRoles -contains $RoleInput) {
+                return $RoleInput
+            } else {
+                Write-Host "Invalid role [$RoleInput]. Valid roles are: $($ValidCalendarRoles -join ', ')"
+            }
+        } while ($true)
     }
 
     # Prompt for initial mailbox + trustee
@@ -101,67 +131,81 @@ function Set-MailboxPermissions {
                 Write-Host "`n--- SendOnBehalf Permissions ---"
                 (Get-Mailbox -Identity $Identity).GrantSendOnBehalfTo | Format-Table -AutoSize
 
-                Write-Host "`n--- Calendar Permissions ---"
-                Get-MailboxFolderPermission -Identity "${Identity}:\Calendar" | Format-Table User, AccessRights -AutoSize
+                if (Validate-Mailbox $Identity) {
+                    Write-Host "`n--- Calendar Permissions ---"
+                    Get-MailboxFolderPermission -Identity "${Identity}:\Calendar" | Format-Table User, AccessRights -AutoSize
+                }
             }
             "9" {
-                $AccessRight = Read-Host "Enter Calendar Permission Role (e.g. Reviewer, Editor, Owner)"
-                Add-MailboxFolderPermission -Identity "${Identity}:\Calendar" -User $Trustee -AccessRights $AccessRight -Confirm:$false
-                Write-Host "Calendar permission ($AccessRight) added for $Trustee."
-                Write-Log "Added Calendar permission [$AccessRight] for Trustee [$Trustee] on [$Identity]"
+                if (Validate-Mailbox $Identity) {
+                    $AccessRight = Get-ValidCalendarRole "Enter Calendar Permission Role"
+                    Add-MailboxFolderPermission -Identity "${Identity}:\Calendar" -User $Trustee -AccessRights $AccessRight -Confirm:$false
+                    Write-Host "Calendar permission ($AccessRight) added for $Trustee."
+                    Write-Log "Added Calendar permission [$AccessRight] for Trustee [$Trustee] on [$Identity]"
+                }
             }
             "10" {
-                Remove-MailboxFolderPermission -Identity "${Identity}:\Calendar" -User $Trustee -Confirm:$false
-                Write-Host "Calendar permission removed for $Trustee."
-                Write-Log "Removed Calendar permission for Trustee [$Trustee] on [$Identity]"
+                if (Validate-Mailbox $Identity) {
+                    Remove-MailboxFolderPermission -Identity "${Identity}:\Calendar" -User $Trustee -Confirm:$false
+                    Write-Host "Calendar permission removed for $Trustee."
+                    Write-Log "Removed Calendar permission for Trustee [$Trustee] on [$Identity]"
+                }
             }
             "11" {
-                Write-Host "Listing Calendar permissions for mailbox: $Identity"
-                Get-MailboxFolderPermission -Identity "${Identity}:\Calendar" | Format-Table User, AccessRights -AutoSize
+                if (Validate-Mailbox $Identity) {
+                    Write-Host "Listing Calendar permissions for mailbox: $Identity"
+                    Get-MailboxFolderPermission -Identity "${Identity}:\Calendar" | Format-Table User, AccessRights -AutoSize
+                }
             }
             "12" {
-                $Trustees = Read-Host "Enter multiple trustees (comma-separated emails)"
-                $TrusteeList = $Trustees -split ","
-                $AccessRight = Read-Host "Enter Calendar Permission Role"
-                foreach ($user in $TrusteeList) {
-                    $trimmedUser = $user.Trim()
-                    Add-MailboxFolderPermission -Identity "${Identity}:\Calendar" -User $trimmedUser -AccessRights $AccessRight -Confirm:$false
-                    Write-Host "Calendar permission ($AccessRight) added for $trimmedUser."
-                    Write-Log "Added Calendar permission [$AccessRight] for Trustee [$trimmedUser] on [$Identity]"
+                if (Validate-Mailbox $Identity) {
+                    $Trustees = Read-Host "Enter multiple trustees (comma-separated emails)"
+                    $TrusteeList = $Trustees -split ","
+                    $AccessRight = Get-ValidCalendarRole "Enter Calendar Permission Role"
+                    foreach ($user in $TrusteeList) {
+                        $trimmedUser = $user.Trim()
+                        Add-MailboxFolderPermission -Identity "${Identity}:\Calendar" -User $trimmedUser -AccessRights $AccessRight -Confirm:$false
+                        Write-Host "Calendar permission ($AccessRight) added for $trimmedUser."
+                        Write-Log "Added Calendar permission [$AccessRight] for Trustee [$trimmedUser] on [$Identity]"
+                    }
                 }
             }
             "13" {
-                $CSVPath = Read-Host "Enter path to CSV (must have a 'User' column)"
-                if (Test-Path $CSVPath) {
-                    $Users = Import-Csv $CSVPath
-                    $AccessRight = Read-Host "Enter Calendar Permission Role"
-                    foreach ($u in $Users) {
-                        $UserEmail = $u.User.Trim()
-                        Add-MailboxFolderPermission -Identity "${Identity}:\Calendar" -User $UserEmail -AccessRights $AccessRight -Confirm:$false
-                        Write-Host "Calendar permission ($AccessRight) added for $UserEmail."
-                        Write-Log "Added Calendar permission [$AccessRight] for Trustee [$UserEmail] on [$Identity]"
+                if (Validate-Mailbox $Identity) {
+                    $CSVPath = Read-Host "Enter path to CSV (must have a 'User' column)"
+                    if (Test-Path $CSVPath) {
+                        $Users = Import-Csv $CSVPath
+                        $AccessRight = Get-ValidCalendarRole "Enter Calendar Permission Role"
+                        foreach ($u in $Users) {
+                            $UserEmail = $u.User.Trim()
+                            Add-MailboxFolderPermission -Identity "${Identity}:\Calendar" -User $UserEmail -AccessRights $AccessRight -Confirm:$false
+                            Write-Host "Calendar permission ($AccessRight) added for $UserEmail."
+                            Write-Log "Added Calendar permission [$AccessRight] for Trustee [$UserEmail] on [$Identity]"
+                        }
+                    } else {
+                        Write-Host "CSV file not found at $CSVPath"
                     }
-                } else {
-                    Write-Host "CSV file not found at $CSVPath"
                 }
             }
             "14" {
-                $CSVPath = Read-Host "Enter path to CSV (must have a 'User' column)"
-                if (Test-Path $CSVPath) {
-                    $Users = Import-Csv $CSVPath
-                    foreach ($u in $Users) {
-                        $UserEmail = $u.User.Trim()
-                        try {
-                            Remove-MailboxFolderPermission -Identity "${Identity}:\Calendar" -User $UserEmail -Confirm:$false -ErrorAction Stop
-                            Write-Host "Calendar permission removed for $UserEmail."
-                            Write-Log "Removed Calendar permission for Trustee [$UserEmail] on [$Identity]"
-                        } catch {
-                            Write-Host "Failed to remove permission for $UserEmail"
-                            Write-Log "FAILED removing Calendar permission for [$UserEmail] on [$Identity]"
+                if (Validate-Mailbox $Identity) {
+                    $CSVPath = Read-Host "Enter path to CSV (must have a 'User' column)"
+                    if (Test-Path $CSVPath) {
+                        $Users = Import-Csv $CSVPath
+                        foreach ($u in $Users) {
+                            $UserEmail = $u.User.Trim()
+                            try {
+                                Remove-MailboxFolderPermission -Identity "${Identity}:\Calendar" -User $UserEmail -Confirm:$false -ErrorAction Stop
+                                Write-Host "Calendar permission removed for $UserEmail."
+                                Write-Log "Removed Calendar permission for Trustee [$UserEmail] on [$Identity]"
+                            } catch {
+                                Write-Host "Failed to remove permission for $UserEmail"
+                                Write-Log "FAILED removing Calendar permission for [$UserEmail] on [$Identity]"
+                            }
                         }
+                    } else {
+                        Write-Host "CSV file not found at $CSVPath"
                     }
-                } else {
-                    Write-Host "CSV file not found at $CSVPath"
                 }
             }
             "15" {
