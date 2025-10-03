@@ -1,6 +1,8 @@
 # Mailbox Permissions Management Script
 
 #Author:   Seth Gullion
+
+
 #Company:  Standard Office Systems of Atlanta
 
 A **PowerShell script** to manage Exchange Online mailboxes, calendar permissions, and Microsoft Graph UPN/alias management from a single interactive menu. Designed for IT admins managing multiple tenants.
