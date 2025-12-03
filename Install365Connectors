@@ -1,0 +1,28 @@
+# ================================================
+# Install Core Microsoft 365 PowerShell Modules
+# MSOnline, AzureAD, Graph, Teams, Exchange, SP
+# ================================================
+
+# List of Microsoft 365 modules to install
+$modules = @(
+    "MSOnline",
+    "AzureAD",
+    "Microsoft.Graph",
+    "MicrosoftTeams",
+    "ExchangeOnlineManagement",
+    "Microsoft.Online.SharePoint.PowerShell"
+)
+
+Write-Host "Installing Microsoft 365 Core Modules..." -ForegroundColor Cyan
+
+foreach ($module in $modules) {
+    try {
+        Write-Host "Installing $module..." -ForegroundColor Yellow
+        Install-Module -Name $module -Force -AllowClobber -ErrorAction Stop
+        Write-Host "Successfully installed $module`n" -ForegroundColor Green
+    } catch {
+        Write-Host "Failed to install $module: $_`n" -ForegroundColor Red
+    }
+}
+
+Write-Host "All requested modules installed." -ForegroundColor Cyan
