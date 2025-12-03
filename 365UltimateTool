@@ -1,5 +1,3 @@
-
-
 <#
 .SYNOPSIS
     Ultimate Microsoft 365 Management GUI
@@ -8,7 +6,7 @@
     Features include: Connect to multiple services, manage Graph API scopes, and perform offboarding tasks.
 .NOTES
     Author: Seth G
-    Version: 1.0
+    Version: 1.7 Updated of as 12-25
     Requires: Windows PowerShell 5.1 or PowerShell 7+
 #>
 
@@ -17,6 +15,7 @@
 # Import required assemblies
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName Microsoft.VisualBasic
 
 # Initialize logging
 $Global:LogPath = "C:\Temp\UltimatePS"
@@ -42,7 +41,7 @@ function Show-ErrorMessage {
         [string]$Message
     )
     Write-Log -Message "$Title - $Message" -Level ERROR
-    [System.Windows.Forms.MessageBox]::Show($Message, $Title, [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    [System.Windows.Forms.MessageBox]::Show($Message, $Title, [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
 }
 
 function Show-InfoMessage {
@@ -51,7 +50,7 @@ function Show-InfoMessage {
         [string]$Message
     )
     Write-Log -Message "$Title - $Message" -Level INFO
-    [System.Windows.Forms.MessageBox]::Show($Message, $Title, [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+    [System.Windows.Forms.MessageBox]::Show($Message, $Title, [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
 }
 
 # Global connection status
@@ -72,86 +71,219 @@ $Global:GraphScopes = @(
     "Directory.ReadWrite.All"
 )
 
+# License SKU ID to Friendly Name Mapping
+$Global:LicenseNameMap = @{
+    "f245ecc8-75af-4f8e-b61f-27d8114de5f3" = "Microsoft 365 Business Standard"
+    "4b9405b0-7788-4568-add1-99614e613b69" = "Exchange Online Plan 1"
+    "3b555118-da6a-4418-894f-7df1e2096870" = "Microsoft 365 Business Basic"
+    "078d2b04-f1bd-4111-bbd4-b4b1b354cef4" = "Azure Active Directory Premium P1"
+    "6470687e-a428-4b7a-bef2-8a291ad125d4" = "Microsoft 365 Business Premium"
+    "05e9a617-0261-4cee-bb44-138d3ef2d965" = "Microsoft 365 Apps for Business"
+    "1f2f344a-700d-42c9-9427-5cea1d5d7ba7" = "Microsoft 365 Business Enterprise"
+    "cbdc14ab-d96c-4c30-b9f4-6ada7cdc1d46" = "Enterprise Mobility + Security E3"
+    "b05e124f-c7cc-45a0-a6aa-8cf78c946968" = "Enterprise Mobility + Security E5"
+    "44575883-256e-4591-8a5f-d36c0d2b3b42" = "Microsoft Teams Rooms Standard"
+    "a4b494c5-3f75-4538-b283-7ee4d5e9b73f" = "Power BI Premium Per User"
+    "9e7cff7f-de5b-4ac3-8014-8db6ee40b5f7" = "Dynamics 365 Sales Professional"
+    "1a4a6e1a-3e29-4cba-9add-d125cdf7d5c8" = "Dynamics 365 Customer Service Professional"
+    "6a0f6da1-4c13-4af0-8ff2-e1d08787c2d7" = "Project Plan 3"
+    "09015f9f-377f-4538-848d-2bba038ce53b" = "Project Plan 5"
+    "2b9c8e7c-319c-43a2-a2a0-48c5c6161164" = "Visio Plan 1"
+    "3b051492-8d88-4af1-86b0-4d71fe355cbe" = "Visio Plan 2"
+}
+
 # Check and install required modules
 function Test-AndInstallModule {
     param([string]$ModuleName)
     
-    if (-not (Get-Module -ListAvailable -Name $ModuleName)) {
-        $result = [System.Windows.Forms.MessageBox]::Show(
-            "Module '$ModuleName' is not installed. Would you like to install it now?",
-            "Module Required",
-            [System.Windows.Forms.MessageBoxButtons]::YesNo,
-            [System.Windows.Forms.MessageBoxIcon]::Question
-        )
-        
-        if ($result -eq 'Yes') {
-            try {
-                Write-Log "Installing module: $ModuleName"
-                Install-Module -Name $ModuleName -Force -AllowClobber -Scope CurrentUser
-                Show-InfoMessage -Title "Success" -Message "Module '$ModuleName' installed successfully."
-                return $true
-            }
-            catch {
-                Show-ErrorMessage -Title "Installation Failed" -Message "Failed to install '$ModuleName': $_"
-                return $false
-            }
-        }
-        return $false
+    # First check if module is already loaded
+    if (Get-Module -Name $ModuleName -ErrorAction SilentlyContinue) {
+        Write-Log "Module '$ModuleName' is already loaded"
+        return $true
     }
-    return $true
+    
+    # Then check if it's available to import
+    $availableModule = Get-Module -ListAvailable -Name $ModuleName -ErrorAction SilentlyContinue
+    if ($availableModule) {
+        Write-Log "Module '$ModuleName' found, attempting to import..."
+        try {
+            Import-Module -Name $ModuleName -Force -ErrorAction Stop
+            Write-Log "Successfully imported module '$ModuleName'"
+            return $true
+        }
+        catch {
+            Write-Log "Failed to import module '$ModuleName': $_" -Level "WARNING"
+            # Continue to ask for reinstall
+        }
+    }
+    
+    # If not found or import failed, ask to install
+    Write-Log "Module '$ModuleName' not available, prompting user for installation"
+    $result = [System.Windows.Forms.MessageBox]::Show(
+        "Module '$ModuleName' is not installed or not available. Would you like to install it now?",
+        "Module Required",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+    )
+    
+    if ($result -eq 'Yes') {
+        try {
+            Write-Log "User requested installation of module: $ModuleName"
+            
+            # Special handling for Microsoft.Graph due to function capacity limits
+            if ($ModuleName -eq "Microsoft.Graph") {
+                Write-Log "Installing Microsoft.Graph with special parameters for large module..."
+                Install-Module -Name $ModuleName -Force -AllowClobber -Scope CurrentUser -SkipPublisherCheck -ErrorAction Stop
+                Write-Log "Microsoft.Graph installation completed, now importing..."
+                
+                # Wait a moment for the module to be available
+                Start-Sleep -Seconds 2
+                
+                Import-Module -Name $ModuleName -Force -ErrorAction Stop
+                Write-Log "Microsoft.Graph imported successfully"
+            }
+            else {
+                Write-Log "Installing module: $ModuleName"
+                Install-Module -Name $ModuleName -Force -AllowClobber -Scope CurrentUser -ErrorAction Stop
+                Import-Module -Name $ModuleName -Force -ErrorAction Stop
+                Write-Log "Module '$ModuleName' installed and imported successfully"
+            }
+            
+            Show-InfoMessage -Title "Success" -Message "Module '$ModuleName' installed successfully."
+            return $true
+        }
+        catch {
+            $errorMsg = $_.Exception.Message
+            Write-Log "Failed to install '$ModuleName': $errorMsg" -Level "ERROR"
+            Show-ErrorMessage -Title "Installation Failed" -Message "Failed to install '$ModuleName':`n`n$errorMsg`n`nPlease try installing manually using:`nInstall-Module -Name $ModuleName -Force -AllowClobber -Scope CurrentUser -SkipPublisherCheck"
+            return $false
+        }
+    }
+    else {
+        Write-Log "User declined installation of module: $ModuleName"
+    }
+    return $false
 }
 
-# Connection Functions
+# Connection Functions with improved error handling
 function Connect-ToGraph {
     try {
-        if (-not (Test-AndInstallModule -ModuleName "Microsoft.Graph")) { return }
+        # Load only the necessary Microsoft.Graph submodules to avoid function capacity issues
+        Write-Log "Loading Microsoft.Graph submodules..."
+        Import-Module -Name Microsoft.Graph.Authentication -Force -ErrorAction SilentlyContinue
+        Import-Module -Name Microsoft.Graph.Users -Force -ErrorAction SilentlyContinue
+        Import-Module -Name Microsoft.Graph.Users.Actions -Force -ErrorAction SilentlyContinue
         
-        Write-Log "Connecting to Microsoft Graph with scopes: $($Global:GraphScopes -join ', ')"
-        Connect-MgGraph -Scopes $Global:GraphScopes -NoWelcome
-        
-        $context = Get-MgContext
+        # Check if already connected
+        $context = Get-MgContext -ErrorAction SilentlyContinue
         if ($context) {
+            $tenantId = $context.TenantId
+            Write-Log "Already connected to Microsoft Graph - Tenant: $tenantId"
             $Global:ConnectionStatus.Graph.Connected = $true
-            $Global:ConnectionStatus.Graph.Tenant = $context.TenantId
+            $Global:ConnectionStatus.Graph.Tenant = $tenantId
             $Global:ConnectionStatus.Graph.LastCheck = Get-Date
-            Write-Log "Successfully connected to Microsoft Graph - Tenant: $($context.TenantId)"
             Update-ConnectionStatus
-            Show-InfoMessage -Title "Success" -Message "Connected to Microsoft Graph`nTenant: $($context.TenantId)"
+            Show-InfoMessage -Title "Already Connected" -Message "Already connected to Microsoft Graph`nTenant: $tenantId"
+            return $true
+        }
+
+        Write-Log "Connecting to Microsoft Graph with scopes: $($Global:GraphScopes -join ', ')"
+        
+        try {
+            try { Disconnect-MgGraph -ErrorAction SilentlyContinue } catch { }
+            
+            # Connect with interactive authentication
+            Connect-MgGraph -Scopes $Global:GraphScopes -ErrorAction Stop
+            
+            $context = Get-MgContext -ErrorAction Stop
+            if ($context) {
+                $tenantId = $context.TenantId
+                $Global:ConnectionStatus.Graph.Connected = $true
+                $Global:ConnectionStatus.Graph.Tenant = $tenantId
+                $Global:ConnectionStatus.Graph.LastCheck = Get-Date
+                Write-Log "Successfully connected to Microsoft Graph - Tenant: $tenantId"
+                Update-ConnectionStatus
+                Show-InfoMessage -Title "Success" -Message "Connected to Microsoft Graph`nTenant: $tenantId"
+                return $true
+            } else {
+                throw "Failed to get connection context after authentication"
+            }
+        } catch {
+            $errorMsg = $_.Exception.Message
+            Write-Log "Error connecting to Microsoft Graph: $errorMsg" -Level "ERROR"
+            throw "Failed to connect to Microsoft Graph: $errorMsg"
         }
     }
     catch {
-        Show-ErrorMessage -Title "Graph Connection Failed" -Message $_.Exception.Message
+        $Global:ConnectionStatus.Graph.Connected = $false
+        $Global:ConnectionStatus.Graph.Tenant = "Connection Failed"
+        Update-ConnectionStatus
+        Show-ErrorMessage -Title "Connection Failed" -Message "Failed to connect to Microsoft Graph:`n`n$_"
+        return $false
     }
 }
 
 function Connect-ToExchange {
     try {
-        if (-not (Test-AndInstallModule -ModuleName "ExchangeOnlineManagement")) { return }
+        # Ensure ExchangeOnlineManagement module is available
+        Import-Module -Name ExchangeOnlineManagement -Force -ErrorAction SilentlyContinue
         
+        # Check if already connected
+        try {
+            $org = Get-OrganizationConfig -ErrorAction SilentlyContinue
+            if ($org) {
+                Write-Log "Already connected to Exchange Online - Organization: $($org.Name)"
+                $Global:ConnectionStatus.Exchange.Connected = $true
+                $Global:ConnectionStatus.Exchange.Tenant = $org.Name
+                $Global:ConnectionStatus.Exchange.LastCheck = Get-Date
+                Update-ConnectionStatus
+                Show-InfoMessage -Title "Already Connected" -Message "Already connected to Exchange Online`nOrganization: $($org.Name)"
+                return $true
+            }
+        } catch { 
+            Write-Log "Error checking Exchange Online connection: $_" -Level "WARNING"
+        }
+
         Write-Log "Connecting to Exchange Online"
-        Connect-ExchangeOnline -ShowBanner:$false
         
-        $org = Get-OrganizationConfig -ErrorAction Stop
-        if ($org) {
-            $Global:ConnectionStatus.Exchange.Connected = $true
-            $Global:ConnectionStatus.Exchange.Tenant = $org.Name
-            $Global:ConnectionStatus.Exchange.LastCheck = Get-Date
-            Write-Log "Successfully connected to Exchange Online - Tenant: $($org.Name)"
-            Update-ConnectionStatus
-            Show-InfoMessage -Title "Success" -Message "Connected to Exchange Online`nTenant: $($org.Name)"
+        try {
+            try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue } catch { }
+            Connect-ExchangeOnline -ShowBanner:$false -UserPrincipalName $null -ErrorAction Stop
+            
+            $org = Get-OrganizationConfig -ErrorAction Stop
+            if ($org) {
+                $Global:ConnectionStatus.Exchange.Connected = $true
+                $Global:ConnectionStatus.Exchange.Tenant = $org.Name
+                $Global:ConnectionStatus.Exchange.LastCheck = Get-Date
+                Write-Log "Successfully connected to Exchange Online - Organization: $($org.Name)"
+                Update-ConnectionStatus
+                Show-InfoMessage -Title "Success" -Message "Connected to Exchange Online`nOrganization: $($org.Name)"
+                return $true
+            } else {
+                throw "Failed to verify Exchange Online connection"
+            }
+        } catch {
+            $errorMsg = $_.Exception.Message
+            Write-Log "Error connecting to Exchange Online: $errorMsg" -Level "ERROR"
+            throw "Failed to connect to Exchange Online: $errorMsg"
         }
     }
     catch {
-        Show-ErrorMessage -Title "Exchange Connection Failed" -Message $_.Exception.Message
+        $Global:ConnectionStatus.Exchange.Connected = $false
+        $Global:ConnectionStatus.Exchange.Tenant = "Connection Failed"
+        Update-ConnectionStatus
+        Show-ErrorMessage -Title "Connection Failed" -Message "Failed to connect to Exchange Online:`n`n$_"
+        return $false
     }
 }
 
 function Connect-ToMSOnline {
     try {
-        if (-not (Test-AndInstallModule -ModuleName "MSOnline")) { return }
+        # Ensure MSOnline module is available
+        Import-Module -Name MSOnline -Force -ErrorAction SilentlyContinue
         
         Write-Log "Connecting to MSOnline"
-        Connect-MsolService
+        Connect-MsolService -ErrorAction Stop
         
         $tenant = Get-MsolCompanyInformation -ErrorAction Stop
         if ($tenant) {
@@ -170,10 +302,11 @@ function Connect-ToMSOnline {
 
 function Connect-ToAzureAD {
     try {
-        if (-not (Test-AndInstallModule -ModuleName "AzureAD")) { return }
+        # Ensure AzureAD module is available
+        Import-Module -Name AzureAD -Force -ErrorAction SilentlyContinue
         
         Write-Log "Connecting to Azure AD"
-        $connection = Connect-AzureAD
+        $connection = Connect-AzureAD -ErrorAction Stop
         
         if ($connection) {
             $tenant = Get-AzureADTenantDetail
@@ -192,7 +325,8 @@ function Connect-ToAzureAD {
 
 function Connect-ToSharePoint {
     try {
-        if (-not (Test-AndInstallModule -ModuleName "Microsoft.Online.SharePoint.PowerShell")) { return }
+        # Ensure SharePoint module is available
+        Import-Module -Name Microsoft.Online.SharePoint.PowerShell -Force -ErrorAction SilentlyContinue
         
         $adminUrl = [Microsoft.VisualBasic.Interaction]::InputBox("Enter your SharePoint Admin URL (e.g., https://contoso-admin.sharepoint.com)", "SharePoint Admin URL", "https://")
         
@@ -202,7 +336,7 @@ function Connect-ToSharePoint {
         }
         
         Write-Log "Connecting to SharePoint Online: $adminUrl"
-        Connect-SPOService -Url $adminUrl
+        Connect-SPOService -Url $adminUrl -ErrorAction Stop
         
         $Global:ConnectionStatus.SharePoint.Connected = $true
         $Global:ConnectionStatus.SharePoint.Tenant = $adminUrl
@@ -218,23 +352,39 @@ function Connect-ToSharePoint {
 
 function Connect-ToTeams {
     try {
-        if (-not (Test-AndInstallModule -ModuleName "MicrosoftTeams")) { return }
+        # Ensure MicrosoftTeams module is available
+        Import-Module -Name MicrosoftTeams -Force -ErrorAction SilentlyContinue
         
         Write-Log "Connecting to Microsoft Teams"
-        Connect-MicrosoftTeams
         
-        $tenant = Get-CsTenant -ErrorAction Stop
-        if ($tenant) {
-            $Global:ConnectionStatus.Teams.Connected = $true
-            $Global:ConnectionStatus.Teams.Tenant = $tenant.DisplayName
-            $Global:ConnectionStatus.Teams.LastCheck = Get-Date
-            Write-Log "Successfully connected to Microsoft Teams - Tenant: $($tenant.DisplayName)"
-            Update-ConnectionStatus
-            Show-InfoMessage -Title "Success" -Message "Connected to Microsoft Teams`nTenant: $($tenant.DisplayName)"
+        try {
+            try { Disconnect-MicrosoftTeams -ErrorAction SilentlyContinue } catch { }
+            Connect-MicrosoftTeams -AccountId $null -ErrorAction Stop
+            
+            $tenant = Get-CsTenant -ErrorAction Stop
+            if ($tenant) {
+                $Global:ConnectionStatus.Teams.Connected = $true
+                $Global:ConnectionStatus.Teams.Tenant = $tenant.DisplayName
+                $Global:ConnectionStatus.Teams.LastCheck = Get-Date
+                Write-Log "Successfully connected to Microsoft Teams - Tenant: $($tenant.DisplayName)"
+                Update-ConnectionStatus
+                Show-InfoMessage -Title "Success" -Message "Connected to Microsoft Teams`nTenant: $($tenant.DisplayName)"
+                return $true
+            } else {
+                throw "Failed to verify Teams connection"
+            }
+        } catch {
+            $errorMsg = $_.Exception.Message
+            Write-Log "Error connecting to Microsoft Teams: $errorMsg" -Level "ERROR"
+            throw "Failed to connect to Microsoft Teams: $errorMsg"
         }
     }
     catch {
-        Show-ErrorMessage -Title "Teams Connection Failed" -Message $_.Exception.Message
+        $Global:ConnectionStatus.Teams.Connected = $false
+        $Global:ConnectionStatus.Teams.Tenant = "Connection Failed"
+        Update-ConnectionStatus
+        Show-ErrorMessage -Title "Connection Failed" -Message "Failed to connect to Microsoft Teams:`n`n$_"
+        return $false
     }
 }
 
@@ -242,7 +392,7 @@ function Connect-ToTeams {
 function Disconnect-FromGraph {
     try {
         if ($Global:ConnectionStatus.Graph.Connected) {
-            Disconnect-MgGraph
+            Disconnect-MgGraph -ErrorAction Stop | Out-Null
             $Global:ConnectionStatus.Graph.Connected = $false
             $Global:ConnectionStatus.Graph.Tenant = "Not Connected"
             Write-Log "Disconnected from Microsoft Graph"
@@ -258,7 +408,7 @@ function Disconnect-FromGraph {
 function Disconnect-FromExchange {
     try {
         if ($Global:ConnectionStatus.Exchange.Connected) {
-            Disconnect-ExchangeOnline -Confirm:$false
+            Disconnect-ExchangeOnline -Confirm:$false -ErrorAction Stop
             $Global:ConnectionStatus.Exchange.Connected = $false
             $Global:ConnectionStatus.Exchange.Tenant = "Not Connected"
             Write-Log "Disconnected from Exchange Online"
@@ -274,7 +424,6 @@ function Disconnect-FromExchange {
 function Disconnect-FromMSOnline {
     try {
         if ($Global:ConnectionStatus.MSOnline.Connected) {
-            # MSOnline doesn't have a disconnect command, but we can clear the status
             $Global:ConnectionStatus.MSOnline.Connected = $false
             $Global:ConnectionStatus.MSOnline.Tenant = "Not Connected"
             Write-Log "Cleared MSOnline connection status (requires new PS session to fully disconnect)"
@@ -290,7 +439,7 @@ function Disconnect-FromMSOnline {
 function Disconnect-FromAzureAD {
     try {
         if ($Global:ConnectionStatus.AzureAD.Connected) {
-            Disconnect-AzureAD
+            Disconnect-AzureAD -ErrorAction Stop
             $Global:ConnectionStatus.AzureAD.Connected = $false
             $Global:ConnectionStatus.AzureAD.Tenant = "Not Connected"
             Write-Log "Disconnected from Azure AD"
@@ -306,7 +455,7 @@ function Disconnect-FromAzureAD {
 function Disconnect-FromSharePoint {
     try {
         if ($Global:ConnectionStatus.SharePoint.Connected) {
-            Disconnect-SPOService
+            Disconnect-SPOService -ErrorAction Stop
             $Global:ConnectionStatus.SharePoint.Connected = $false
             $Global:ConnectionStatus.SharePoint.Tenant = "Not Connected"
             Write-Log "Disconnected from SharePoint Online"
@@ -322,7 +471,7 @@ function Disconnect-FromSharePoint {
 function Disconnect-FromTeams {
     try {
         if ($Global:ConnectionStatus.Teams.Connected) {
-            Disconnect-MicrosoftTeams
+            Disconnect-MicrosoftTeams -ErrorAction Stop
             $Global:ConnectionStatus.Teams.Connected = $false
             $Global:ConnectionStatus.Teams.Tenant = "Not Connected"
             Write-Log "Disconnected from Microsoft Teams"
@@ -418,7 +567,6 @@ function Test-AzureADConnection {
 
 function Test-SharePointConnection {
     try {
-        # SharePoint doesn't have a great test command, so we'll rely on connection state
         if ($Global:ConnectionStatus.SharePoint.Connected) {
             $Global:ConnectionStatus.SharePoint.LastCheck = Get-Date
             return $true
@@ -510,8 +658,8 @@ foreach ($service in $services) {
     $btnConnect.Size = New-Object System.Drawing.Size(100, 25)
     $btnConnect.Text = "Connect"
     $btnConnect.Add_Click({
-        param($sender, $e)
-        $funcName = $sender.Tag
+        param($btn, $e)
+        $funcName = $btn.Tag
         & $funcName
     }.GetNewClosure())
     $btnConnect.Tag = $service.ConnectFunc
@@ -523,8 +671,8 @@ foreach ($service in $services) {
     $btnDisconnect.Size = New-Object System.Drawing.Size(100, 25)
     $btnDisconnect.Text = "Disconnect"
     $btnDisconnect.Add_Click({
-        param($sender, $e)
-        $funcName = $sender.Tag
+        param($btn, $e)
+        $funcName = $btn.Tag
         & $funcName
     }.GetNewClosure())
     $btnDisconnect.Tag = $service.DisconnectFunc
@@ -560,7 +708,7 @@ $statusTimer.Start()
 
 # Manual refresh button
 $btnRefreshStatus = New-Object System.Windows.Forms.Button
-$btnRefreshStatus.Location = New-Object System.Drawing.Point(20, $yPosition + 20)
+$btnRefreshStatus.Location = New-Object System.Drawing.Point(20, ($yPosition + 20))
 $btnRefreshStatus.Size = New-Object System.Drawing.Size(150, 30)
 $btnRefreshStatus.Text = "Refresh Status Now"
 $btnRefreshStatus.Add_Click({
@@ -577,7 +725,7 @@ $tabConnect.Controls.Add($btnRefreshStatus)
 
 # Last check label
 $Global:lblLastCheck = New-Object System.Windows.Forms.Label
-$Global:lblLastCheck.Location = New-Object System.Drawing.Point(180, $yPosition + 25)
+$Global:lblLastCheck.Location = New-Object System.Drawing.Point(180, ($yPosition + 25))
 $Global:lblLastCheck.Size = New-Object System.Drawing.Size(400, 20)
 $Global:lblLastCheck.Text = "Auto-refresh every 30 seconds"
 $Global:lblLastCheck.Font = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Italic)
@@ -719,7 +867,7 @@ $tabGraphScope.Controls.Add($btnApplyScopes)
 
 # Current scopes label
 $Global:lblCurrentScopes = New-Object System.Windows.Forms.Label
-$Global:lblCurrentScopes.Location = New-Object System.Drawing.Point(20, $yPosScope + 40)
+$Global:lblCurrentScopes.Location = New-Object System.Drawing.Point(20, ($yPosScope + 40))
 $Global:lblCurrentScopes.Size = New-Object System.Drawing.Size(600, 60)
 $Global:lblCurrentScopes.Text = "Current Scopes: $($Global:GraphScopes -join ', ')"
 $Global:lblCurrentScopes.Font = New-Object System.Drawing.Font("Segoe UI", 8)
@@ -729,6 +877,7 @@ $tabGraphScope.Controls.Add($Global:lblCurrentScopes)
 # ==================== TAB 3: Offboarding ====================
 $tabOffboarding = New-Object System.Windows.Forms.TabPage
 $tabOffboarding.Text = "Offboarding"
+$tabOffboarding.AutoScroll = $true
 $tabControl.Controls.Add($tabOffboarding)
 
 $yPosOff = 20
@@ -1048,7 +1197,13 @@ $btnViewLicenses.Add_Click({
         }
         else {
             foreach ($license in $licenses) {
-                $lstLicenses.Items.Add($license.SkuId)
+                $skuId = $license.SkuId
+                $licenseName = $Global:LicenseNameMap[$skuId]
+                if ([string]::IsNullOrWhiteSpace($licenseName)) {
+                    $licenseName = "Unknown License"
+                }
+                $displayText = "$skuId`t$licenseName"
+                $lstLicenses.Items.Add($displayText)
             }
             Write-Log "Retrieved $($licenses.Count) licenses for user: $selectedUser"
         }
@@ -1106,7 +1261,9 @@ $btnRemoveLicense.Add_Click({
     
     $licensesToRemove = @()
     foreach ($item in $lstLicenses.SelectedItems) {
-        $licensesToRemove += $item.ToString()
+        # Extract just the SKU ID (first part before the tab)
+        $skuId = $item.ToString().Split("`t")[0]
+        $licensesToRemove += $skuId
     }
     
     $confirm = [System.Windows.Forms.MessageBox]::Show(
@@ -1120,9 +1277,8 @@ $btnRemoveLicense.Add_Click({
         try {
             Write-Log "Removing licenses for user: $selectedUser - Licenses: $($licensesToRemove -join ', ')"
             
-            foreach ($licenseId in $licensesToRemove) {
-                Set-MgUserLicense -UserId $selectedUser -AddLicenses @() -RemoveLicenses @($licenseId)
-            }
+            # Remove all licenses at once
+            Set-MgUserLicense -UserId $selectedUser -AddLicenses @() -RemoveLicenses $licensesToRemove
             
             Write-Log "Successfully removed licenses for: $selectedUser"
             Show-InfoMessage -Title "Success" -Message "License(s) removed for $selectedUser"
@@ -1137,7 +1293,13 @@ $btnRemoveLicense.Add_Click({
             }
             else {
                 foreach ($license in $licenses) {
-                    $lstLicenses.Items.Add($license.SkuId)
+                    $skuId = $license.SkuId
+                    $licenseName = $Global:LicenseNameMap[$skuId]
+                    if ([string]::IsNullOrWhiteSpace($licenseName)) {
+                        $licenseName = "Unknown License"
+                    }
+                    $displayText = "$skuId`t$licenseName"
+                    $lstLicenses.Items.Add($displayText)
                 }
             }
         }
@@ -1185,17 +1347,27 @@ Test-SharePointConnection | Out-Null
 Test-TeamsConnection | Out-Null
 Update-ConnectionStatus
 
-# Add VB assembly for InputBox
-Add-Type -AssemblyName Microsoft.VisualBasic
-
 # Show the form
 Write-Log "=== Ultimate Microsoft 365 Management Tool Started ==="
 Write-Log "Log file location: $Global:LogFile"
 
-[void]$form.ShowDialog()
-
-# Cleanup on exit
-$statusTimer.Stop()
-$statusTimer.Dispose()
-Write-Log "=== Ultimate Microsoft 365 Management Tool Closed ==="
- 
+try {
+    [void]$form.ShowDialog()
+}
+catch {
+    Write-Log "Error in main form: $_" -Level "ERROR"
+    Show-ErrorMessage -Title "Application Error" -Message "An error occurred: $_"
+}
+finally {
+    # Cleanup on exit
+    if ($statusTimer) {
+        try {
+            $statusTimer.Stop()
+            $statusTimer.Dispose()
+        }
+        catch {
+            Write-Log "Error cleaning up timer: $_" -Level "WARNING"
+        }
+    }
+    Write-Log "=== Ultimate Microsoft 365 Management Tool Closed ==="
+}
