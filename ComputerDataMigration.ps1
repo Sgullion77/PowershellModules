@@ -24,7 +24,7 @@ function Write-Log {
     "$time - $msg" | Out-File -Append -FilePath $logFile
 }
 
-# 🔴 NEW: Close apps safely + restart explorer
+# NEW: Close apps safely + restart explorer
 function Close-UserApps {
 
     Write-Host "Apps will close in 5 seconds. Save your work!"
@@ -158,7 +158,7 @@ $btn.Add_Click({
     $global:logFile = "$base\migration_log.txt"
     New-Item $logFile -Force | Out-Null
 
-    # 🔴 CLOSE APPS BEFORE COPY
+    # CLOSE APPS BEFORE COPY
     Close-UserApps
 
     $tasks = @()
