@@ -24,58 +24,37 @@ function Write-Log {
     "$time - $msg" | Out-File -Append -FilePath $logFile
 }
 
-# NEW: Close apps safely + restart explorer
 function Close-UserApps {
-
-    Write-Host "Apps will close in 5 seconds. Save your work!"
+    Write-Host "Closing apps in 5 seconds..."
     Start-Sleep 5
 
-    Write-Log "Closing user applications..."
+    $processes = @("chrome","msedge","firefox","outlook","teams","onedrive","explorer")
 
-    $processes = @(
-        "chrome",
-        "msedge",
-        "firefox",
-        "outlook",
-        "teams",
-        "onedrive",
-        "explorer"
-    )
-
-    foreach ($procName in $processes) {
-        $procs = Get-Process -Name $procName -ErrorAction SilentlyContinue
-
-        foreach ($proc in $procs) {
+    foreach ($p in $processes) {
+        Get-Process -Name $p -ErrorAction SilentlyContinue | ForEach-Object {
             try {
-                if ($proc.CloseMainWindow()) {
-                    Write-Log "Gracefully closing $($proc.ProcessName)"
-                    Start-Sleep 2
-                }
-
-                if (!$proc.HasExited) {
-                    Stop-Process -Id $proc.Id -Force
-                    Write-Log "Force killed $($proc.ProcessName)"
-                }
-            } catch {
-                Write-Log "Failed to close $($proc.ProcessName)"
-            }
+                if ($_.CloseMainWindow()) { Start-Sleep 2 }
+                if (!$_.HasExited) { Stop-Process $_ -Force }
+                Write-Log "Closed $($_.ProcessName)"
+            } catch {}
         }
     }
 
-    # Restart Explorer cleanly
     Start-Sleep 2
     Start-Process explorer.exe
     Write-Log "Explorer restarted"
-
-    Write-Log "App closure complete"
 }
 
 function Run-Robo {
     param($src,$dst,$name)
 
     if (Test-Path $src) {
+        if (!(Test-Path $dst)) {
+            New-Item -ItemType Directory -Path $dst -Force | Out-Null
+        }
+
         Write-Log "Copying $name"
-        robocopy $src $dst /E /COPY:DAT /R:2 /W:2 /MT:16 /NFL /NDL | Out-Null
+        robocopy $src $dst /E /COPY:DAT /R:2 /W:2 /MT:16
     } else {
         Write-Log "Skipped $name (not found)"
     }
@@ -88,9 +67,9 @@ $users = Get-ChildItem C:\Users | Where-Object {
 
 # UI
 $window = New-Object Windows.Window
-$window.Title = "MSP Profile Migration Tool"
+$window.Title = "MSP Migration Tool"
 $window.Width = 500
-$window.Height = 500
+$window.Height = 520
 
 $stack = New-Object Windows.Controls.StackPanel
 $window.Content = $stack
@@ -118,24 +97,15 @@ function Add-Check($name) {
     $checks[$name] = $cb
 }
 
-Add-Check "Desktop"
-Add-Check "Documents"
-Add-Check "Pictures"
-Add-Check "Videos"
-Add-Check "Favorites"
-Add-Check "Downloads"
-Add-Check "Chrome"
-Add-Check "Edge"
-Add-Check "Firefox"
-Add-Check "Outlook"
-Add-Check "Signatures"
-Add-Check "Start Menu"
-Add-Check "Quick Access"
-Add-Check "Taskbar Pins"
+"Desktop","Documents","Pictures","Videos","Favorites","Downloads",
+"Chrome","Edge","Firefox","Outlook","Signatures","Start Menu",
+"Quick Access","Taskbar Pins" | ForEach-Object { Add-Check $_ }
 
 $progress = New-Object Windows.Controls.ProgressBar
 $progress.Height = 20
 $progress.Margin = "10"
+$progress.Minimum = 0
+$progress.Maximum = 100
 $stack.Children.Add($progress)
 
 $status = New-Object Windows.Controls.Label
@@ -158,19 +128,18 @@ $btn.Add_Click({
     $global:logFile = "$base\migration_log.txt"
     New-Item $logFile -Force | Out-Null
 
-    # CLOSE APPS BEFORE COPY
     Close-UserApps
 
-    $tasks = @()
+    # FIXED TASK LIST
+    $tasks = New-Object System.Collections.ArrayList
 
     function Add-Task($name,$src,$dst) {
-        if ($checks[$name].IsChecked) {
-            $tasks += @{n=$name;s=$src;d=$dst}
+        if ($checks[$name].IsChecked -eq $true) {
+            $null = $tasks.Add(@{n=$name;s=$src;d=$dst})
         }
     }
 
     if ($action -eq "Backup") {
-
         Add-Task "Desktop" "C:\Users\$user\Desktop" "$base\Desktop"
         Add-Task "Documents" "C:\Users\$user\Documents" "$base\Documents"
         Add-Task "Pictures" "C:\Users\$user\Pictures" "$base\Pictures"
@@ -188,9 +157,8 @@ $btn.Add_Click({
 
         Add-Task "Quick Access" "C:\Users\$user\AppData\Roaming\Microsoft\Windows\Recent" "$base\QuickAccess"
         Add-Task "Taskbar Pins" "C:\Users\$user\AppData\Roaming\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar" "$base\Taskbar"
-
-    } else {
-
+    }
+    else {
         Add-Task "Desktop" "$base\Desktop" "C:\Users\$user\Desktop"
         Add-Task "Documents" "$base\Documents" "C:\Users\$user\Documents"
         Add-Task "Pictures" "$base\Pictures" "C:\Users\$user\Pictures"
@@ -213,13 +181,20 @@ $btn.Add_Click({
     $total = $tasks.Count
     $i = 0
 
+    if ($total -eq 0) {
+        $status.Content = "Nothing selected"
+        return
+    }
+
     foreach ($t in $tasks) {
         $i++
+
         $status.Content = "Processing $($t.n)..."
         Run-Robo $t.s $t.d $t.n
 
-        $progress.Value = ($i / $total) * 100
-        $window.Dispatcher.Invoke([action]{}, "Render")
+        $progress.Value = [math]::Round(($i / $total) * 100)
+
+        $window.Dispatcher.Invoke([System.Action]{}, "Render")
     }
 
     $status.Content = "Completed"
